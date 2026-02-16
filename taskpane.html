@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta http-equiv="X-UA-Compatible" content="IE=Edge" />
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Telecrm lead sync</title>
+    <title>Telecrm Sync Pro</title>
     <style>
         /* Same color palette as appscript.html (Telecrm purple + blue loader) */
         body { font-family: 'Segoe UI', Tahoma, sans-serif; padding: 0; margin: 0; background-color: #FFF; color: #333; position: relative; min-height: 100vh; }
@@ -26,6 +26,11 @@
         .log-entry { margin-bottom: 4px; border-bottom: 1px solid #f3f2f1; padding-bottom: 2px; }
         .success { color: #28a745; font-weight: bold; }
         .error { color: #dc3545; font-weight: bold; }
+        .summary-stats { font-size: 13px; margin-bottom: 10px; padding: 10px; background: #f8f9fa; border-radius: 4px; }
+        .summary-stats .stat-line { margin: 4px 0; }
+        .summary-failed-list { font-size: 12px; margin-top: 10px; max-height: 180px; overflow-y: auto; border: 1px solid #e0e0e0; border-radius: 4px; padding: 8px; background: #fff; }
+        .summary-failed-list .failed-item { padding: 6px 0; border-bottom: 1px solid #f0f0f0; }
+        .summary-failed-list .failed-item:last-child { border-bottom: none; }
         .footer { font-size: 10px; color: #888; text-align: center; margin-top: 20px; }
 
         /* Overlay loader (same as AppScript getEnhancedLoaderStyles) */
@@ -114,6 +119,13 @@
                 <div class="log-entry">Ready. Click "Send All Data to CRM" to sync.</div>
             </div>
         </div>
+
+        <div id="summary-card" class="card summary-card" style="display: none;">
+            <div style="font-size: 13px; font-weight: 600; margin-bottom: 8px;">Sync overview</div>
+            <div id="summary-stats" class="summary-stats"></div>
+            <div id="summary-failed-list" class="summary-failed-list" style="display: none;"></div>
+        </div>
+        <div class="footer">Connected to Telecrm API v2.0</div>
     </div>
 
     <!-- Load Office.js first so it runs before our script (required for Office.onReady) -->
@@ -140,6 +152,9 @@
             token: "00b7c0bd-b8fb-43bd-915a-6981251312f51771223724641:aa7a74d0-7ae9-4726-a188-e57dfa7a823f",
             apiUrl: function(id) { return "https://next-api.telecrm.in/enterprise/68ca629e32c595c15bfc4f6f/autoupdatelead"; }
         };
+
+        var LOG_SHEET_NAME = "Telecrm Sync Log";
+        var LOG_HEADERS = ["Date/Time", "Excel Row", "Name", "Phone", "Email", "Error"];
 
         // ----- Loader helpers (same UX as AppScript Send Data dialog) -----
         function showTelecrmLoader(message, status) {
@@ -177,95 +192,199 @@
         }
 
         async function handleSync() {
-            const btn = document.getElementById("run-button");
-            const progressArea = document.getElementById("progress-area");
-            const progressBar = document.getElementById("progress-bar");
-            const percentText = document.getElementById("percent-text");
-            const statusText = document.getElementById("status-text");
-            const logBox = document.getElementById("log-box");
+            var btn = document.getElementById("run-button");
+            var progressArea = document.getElementById("progress-area");
+            var progressBar = document.getElementById("progress-bar");
+            var percentText = document.getElementById("percent-text");
+            var statusText = document.getElementById("status-text");
+            var logBox = document.getElementById("log-box");
+            var summaryCard = document.getElementById("summary-card");
+            var summaryStats = document.getElementById("summary-stats");
+            var summaryFailedList = document.getElementById("summary-failed-list");
 
             btn.disabled = true;
             progressArea.style.display = "block";
             logBox.innerHTML = "";
+            summaryCard.style.display = "none";
 
-            // Show overlay loader (same as AppScript: "Processing" / "Preparing...")
             showTelecrmLoader("Processing", "Reading sheet data...");
             updateTelecrmProgress(10);
 
             try {
-                await Excel.run(async (context) => {
-                    const sheet = context.workbook.worksheets.getActiveWorksheet();
-                    const range = sheet.getUsedRange();
+                var result = await Excel.run(async (context) => {
+                    var sheet = context.workbook.worksheets.getActiveWorksheet();
+                    var range = sheet.getUsedRange();
                     range.load("values");
+
+                    // Ensure "Telecrm Sync Log" sheet exists
+                    var allSheets = context.workbook.worksheets;
+                    allSheets.load("items/name");
                     await context.sync();
 
-                    const rows = range.values;
-                    const dataLength = rows.length - 1;
+                    var names = allSheets.items.map(function(s) { return s.name; });
+                    var logSheet = null;
+                    var logLastRow = 0;
+                    if (names.indexOf(LOG_SHEET_NAME) === -1) {
+                        logSheet = context.workbook.worksheets.add(LOG_SHEET_NAME);
+                        await context.sync();
+                        var headerRange = logSheet.getRange("A1:F1");
+                        headerRange.values = [LOG_HEADERS];
+                        headerRange.format.font.bold = true;
+                        logLastRow = 1;
+                    } else {
+                        logSheet = context.workbook.worksheets.getItem(LOG_SHEET_NAME);
+                        var logUsed = logSheet.getUsedRange();
+                        logUsed.load("rowCount");
+                        await context.sync();
+                        logLastRow = logUsed.rowCount;
+                        if (logLastRow === 0) {
+                            var headerRange = logSheet.getRange("A1:F1");
+                            headerRange.values = [LOG_HEADERS];
+                            headerRange.format.font.bold = true;
+                            logLastRow = 1;
+                        }
+                    }
+                    await context.sync();
+
+                    var rows = range.values;
+                    var dataLength = rows.length - 1;
 
                     if (dataLength <= 0) {
-                        hideTelecrmLoader();
-                        addLog("No data found to sync.", "error");
-                        return;
+                        return { total: 0, success: 0, failed: 0, failedRows: [] };
                     }
 
-                    updateTelecrmLoaderStatus("Sending to TeleCRM...");
+                    updateTelecrmLoaderStatus("Sending to Telecrm...");
                     updateTelecrmProgress(20);
 
-                    for (let i = 1; i < rows.length; i++) {
-                        const row = rows[i];
-                        const payload = {
+                    var successCount = 0;
+                    var failCount = 0;
+                    var failedRows = [];
+                    var runTime = new Date().toLocaleString();
+
+                    for (var i = 1; i < rows.length; i++) {
+                        var row = rows[i];
+                        var payload = {
                             "fields": {
                                 "name": String(row[0] || ""),
                                 "phone": String(row[1] || ""),
                                 "email": String(row[2] || ""),
-                                "status": "Fresh"
+                                "status": String(row[3] || ""),
                             },
                             "actions": [{ "type": "ACTION_1001", "fields": { "notes": "Excel Add-in Sync" } }]
                         };
 
-                        addLog(`Row ${i + 1} payload: ${JSON.stringify(payload)}`, "");
+                        addLog("Row " + (i + 1) + " payload: " + JSON.stringify(payload), "");
 
+                        var errMsg = "";
                         try {
-                            const response = await fetch(CONFIG.apiUrl(CONFIG.enterpriseId), {
-                                method: 'POST',
+                            var response = await fetch(CONFIG.apiUrl(CONFIG.enterpriseId), {
+                                method: "POST",
                                 headers: {
-                                    'Content-Type': 'application/json',
-                                    'Authorization': `Bearer ${CONFIG.token}`
+                                    "Content-Type": "application/json",
+                                    "Authorization": "Bearer " + CONFIG.token
                                 },
                                 body: JSON.stringify(payload)
                             });
 
                             if (response.ok) {
-                                addLog(`Row ${i + 1}: Success - ${row[0]}`, "success");
+                                successCount++;
+                                addLog("Row " + (i + 1) + ": Success - " + (row[0] || ""), "success");
                             } else {
-                                addLog(`Row ${i + 1}: Failed (${response.status})`, "error");
+                                failCount++;
+                                errMsg = "HTTP " + response.status;
+                                addLog("Row " + (i + 1) + ": Failed (" + response.status + ")", "error");
+                                failedRows.push({
+                                    rowIndex: i + 1,
+                                    name: String(row[0] || ""),
+                                    phone: String(row[1] || ""),
+                                    email: String(row[2] || ""),
+                                    error: errMsg
+                                });
                             }
                         } catch (e) {
-                            addLog(`Row ${i + 1}: Network Error`, "error");
+                            failCount++;
+                            errMsg = e.message || "Network Error";
+                            addLog("Row " + (i + 1) + ": " + errMsg, "error");
+                            failedRows.push({
+                                rowIndex: i + 1,
+                                name: String(row[0] || ""),
+                                phone: String(row[1] || ""),
+                                email: String(row[2] || ""),
+                                error: errMsg
+                            });
                         }
 
-                        const progress = 20 + Math.round((i / dataLength) * 78);
+                        var progress = 20 + Math.round((i / dataLength) * 78);
                         updateTelecrmProgress(progress);
-                        updateTelecrmLoaderStatus(`Sending ${i} of ${dataLength}...`);
+                        updateTelecrmLoaderStatus("Sending " + i + " of " + dataLength + "...");
                         progressBar.style.width = progress + "%";
                         percentText.innerText = Math.round((i / dataLength) * 100) + "%";
-                        statusText.innerText = `Syncing ${i} of ${dataLength}`;
+                        statusText.innerText = "Syncing " + i + " of " + dataLength;
                     }
 
                     updateTelecrmProgress(100);
                     updateTelecrmLoaderStatus("Complete!");
                     statusText.innerText = "Synchronization Complete!";
                     addLog("--- Finished ---", "");
+
+                    // Write failed rows and summary to log sheet
+                    var totalRows = dataLength;
+                    var rowsToWrite = [];
+                    for (var f = 0; f < failedRows.length; f++) {
+                        var fr = failedRows[f];
+                        rowsToWrite.push([runTime, fr.rowIndex, fr.name, fr.phone, fr.email, fr.error]);
+                    }
+                    rowsToWrite.push(["", "", "--- Summary ---", "Success: " + successCount, "Failed: " + failCount, "Total: " + totalRows]);
+
+                    if (rowsToWrite.length > 0) {
+                        var startRow = logLastRow + 1;
+                        var endRow = logLastRow + rowsToWrite.length;
+                        var writeRange = logSheet.getRange("A" + startRow + ":F" + endRow);
+                        writeRange.values = rowsToWrite;
+                    }
+
+                    await context.sync();
+                    return { total: totalRows, success: successCount, failed: failCount, failedRows: failedRows };
                 });
 
                 hideTelecrmLoader();
-                showTelecrmSuccess("All data sent to CRM.");
+                showSummary(result);
             } catch (error) {
                 hideTelecrmLoader();
                 addLog("Error: " + error, "error");
+                showSummary({ total: 0, success: 0, failed: 0, failedRows: [] });
             } finally {
                 btn.disabled = false;
             }
+        }
+
+        function showSummary(result) {
+            var summaryCard = document.getElementById("summary-card");
+            var summaryStats = document.getElementById("summary-stats");
+            var summaryFailedList = document.getElementById("summary-failed-list");
+            if (!result || result.total === 0) {
+                summaryCard.style.display = "none";
+                return;
+            }
+            summaryCard.style.display = "block";
+            var html = "<div class=\"stat-line\"><strong>Total rows:</strong> " + result.total + "</div>";
+            html += "<div class=\"stat-line\"><span class=\"success\">Success:</span> " + result.success + "</div>";
+            html += "<div class=\"stat-line\"><span class=\"error\">Failed:</span> " + result.failed + "</div>";
+            html += "<div class=\"stat-line\" style=\"margin-top:8px;font-size:11px;color:#888;\">Failed details are logged in the \"" + LOG_SHEET_NAME + "\" sheet.</div>";
+            summaryStats.innerHTML = html;
+
+            if (result.failedRows && result.failedRows.length > 0) {
+                summaryFailedList.style.display = "block";
+                var listHtml = "<div style=\"font-weight:600;margin-bottom:6px;\">Failed rows:</div>";
+                for (var i = 0; i < result.failedRows.length; i++) {
+                    var fr = result.failedRows[i];
+                    listHtml += "<div class=\"failed-item\">Row " + fr.rowIndex + " | " + (fr.name || "-") + " | " + (fr.phone || "-") + " | " + (fr.email || "-") + " — <span class=\"error\">" + fr.error + "</span></div>";
+                }
+                summaryFailedList.innerHTML = listHtml;
+            } else {
+                summaryFailedList.style.display = "none";
+            }
+            showTelecrmSuccess("Sync complete. Success: " + result.success + ", Failed: " + result.failed + ".");
         }
 
         function addLog(message, type) {

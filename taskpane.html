@@ -130,6 +130,7 @@
                                 addLog(`Row ${i+1}: Success - ${row[0]}`, "success");
                             } else {
                                 addLog(`Row ${i+1}: Failed (${response.status})`, "error");
+                                addLog(`Row ${i+1}: Failed (${JSON.stringify(payload)})`
                             }
                         } catch (e) {
                             addLog(`Row ${i+1}: Network Error`, "error");

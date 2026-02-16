@@ -8,37 +8,96 @@
     <script src="https://appsforoffice.microsoft.com/lib/1/hosted/office.js" type="text/javascript"></script>
     
     <style>
-        body { font-family: 'Segoe UI', Tahoma, sans-serif; padding: 0; margin: 0; background-color: #faf9f8; color: #323130; }
-        .header { background: #217346; color: white; padding: 20px; text-align: center; }
+        /* Same color palette as appscript.html (Telecrm purple + blue loader) */
+        body { font-family: 'Segoe UI', Tahoma, sans-serif; padding: 0; margin: 0; background-color: #FFF; color: #333; position: relative; min-height: 100vh; }
+        .header { background: #4F38A2; color: white; padding: 20px; text-align: center; }
         .header h1 { margin: 0; font-size: 18px; font-weight: 600; }
         .container { padding: 20px; }
         .card { background: white; border-radius: 4px; padding: 15px; box-shadow: 0 1.6px 3.6px rgba(0,0,0,0.1); margin-bottom: 20px; }
         
-        .ms-Button { background: #217346; color: white; border: none; padding: 12px; width: 100%; font-size: 14px; font-weight: 600; cursor: pointer; border-radius: 2px; }
-        .ms-Button:hover { background: #185735; }
+        .ms-Button { background: #4F38A2; color: white; border: none; padding: 12px; width: 100%; font-size: 14px; font-weight: 600; cursor: pointer; border-radius: 2px; }
+        .ms-Button:hover { background: #6a5acd; }
         .ms-Button:disabled { background: #c8c6c4; cursor: not-allowed; }
 
         .progress-container { margin-top: 20px; }
         .progress-label { display: flex; justify-content: space-between; font-size: 12px; margin-bottom: 5px; }
-        .progress-bg { background: #edebe9; height: 12px; width: 100%; border-radius: 6px; overflow: hidden; }
-        .progress-fill { background: #217346; height: 100%; width: 0%; transition: width 0.3s ease; }
+        .progress-bg { background: rgba(66, 133, 244, 0.2); height: 12px; width: 100%; border-radius: 6px; overflow: hidden; }
+        .progress-fill { background: #4285f4; height: 100%; width: 0%; transition: width 0.3s ease; }
 
-        .log-box { background: #ffffff; border: 1px solid #e1dfdd; height: 200px; overflow-y: auto; font-family: 'Courier New', monospace; font-size: 11px; padding: 10px; margin-top: 10px; }
+        .log-box { background: #ffffff; border: 1px solid #e0e0e0; height: 200px; overflow-y: auto; font-family: 'Courier New', monospace; font-size: 11px; padding: 10px; margin-top: 10px; }
         .log-entry { margin-bottom: 4px; border-bottom: 1px solid #f3f2f1; padding-bottom: 2px; }
-        .success { color: #107c10; font-weight: bold; }
-        .error { color: #a4262c; font-weight: bold; }
-        .footer { font-size: 10px; color: #605e5c; text-align: center; margin-top: 20px; }
+        .success { color: #28a745; font-weight: bold; }
+        .error { color: #dc3545; font-weight: bold; }
+        .footer { font-size: 10px; color: #888; text-align: center; margin-top: 20px; }
+
+        /* Overlay loader (same as AppScript getEnhancedLoaderStyles) */
+        .telecrm-loader-overlay {
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background-color: rgba(255, 255, 255, 0.9);
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            z-index: 1000;
+            transition: opacity 0.3s ease;
+            backdrop-filter: blur(2px);
+        }
+        .telecrm-loader-overlay[hidden] { display: none; }
+        .telecrm-loader-content {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            margin-top: 10px;
+        }
+        .telecrm-loader-message {
+            color: #555;
+            font-size: 14px;
+            font-weight: 500;
+            margin-bottom: 4px;
+        }
+        .telecrm-loader-status {
+            color: #888;
+            font-size: 12px;
+            text-align: center;
+            max-width: 220px;
+        }
+        .telecrm-progress-container {
+            width: 180px;
+            height: 4px;
+            background-color: rgba(66, 133, 244, 0.2);
+            border-radius: 2px;
+            margin-top: 15px;
+            overflow: hidden;
+        }
+        .telecrm-progress-bar {
+            height: 100%;
+            width: 0%;
+            background-color: #4285f4;
+            transition: width 0.3s ease;
+        }
     </style>
 </head>
 <body>
+    <!-- Overlay loader (shown while loading / sending - same as AppScript) -->
+    <div id="telecrm-loader-overlay" class="telecrm-loader-overlay" hidden>
+        <div class="telecrm-loader-content">
+            <div id="telecrm-loader-message" class="telecrm-loader-message">Loading...</div>
+            <div id="telecrm-loader-status" class="telecrm-loader-status"></div>
+            <div id="telecrm-progress-container" class="telecrm-progress-container">
+                <div id="telecrm-progress-bar" class="telecrm-progress-bar"></div>
+            </div>
+        </div>
+    </div>
+
     <div class="header">
         <h1>TeleCRM Lead Sync</h1>
     </div>
 
     <div class="container">
         <div class="card">
-            <p style="margin-top:0; font-size: 13px;">Sync your active sheet data to TeleCRM instantly.</p>
-            <button id="run-button" class="ms-Button">Start Synchronization</button>
+            <p style="margin-top:0; font-size: 13px;">Send all data from the active sheet to TeleCRM in one click.</p>
+            <button id="run-button" class="ms-Button">Send All Data to CRM</button>
             
             <div id="progress-area" style="display:none;" class="progress-container">
                 <div class="progress-label">
@@ -54,7 +113,7 @@
         <div class="card">
             <div style="font-size: 13px; font-weight: 600; margin-bottom: 5px;">Activity Logs</div>
             <div id="log-box" class="log-box">
-                <div class="log-entry">Waiting for user...</div>
+                <div class="log-entry">Ready. Click "Send All Data to CRM" to sync.</div>
             </div>
         </div>
         <div class="footer">Connected to TeleCRM API v2.0</div>
@@ -63,10 +122,45 @@
     <script>
         // CONFIGURATION: Replace with your actual details
         const CONFIG = {
-            enterpriseId: "68ca629e32c595c15bfc4f6f",
-            token: "00b7c0bd-b8fb-43bd-915a-6981251312f51771223724641:aa7a74d0-7ae9-4726-a188-e57dfa7a823f",
+            enterpriseId: "YOUR_ENTERPRISE_ID",
+            token: "YOUR_BEARER_TOKEN",
             apiUrl: (id) => `https://next-api.telecrm.in/enterprise/${id}/autoupdatelead`
         };
+
+        // ----- Loader helpers (same UX as AppScript Send Data dialog) -----
+        function showTelecrmLoader(message, status) {
+            const overlay = document.getElementById("telecrm-loader-overlay");
+            const msgEl = document.getElementById("telecrm-loader-message");
+            const statusEl = document.getElementById("telecrm-loader-status");
+            const progressContainer = document.getElementById("telecrm-progress-container");
+            if (overlay) {
+                if (msgEl) msgEl.textContent = message || "Loading...";
+                if (statusEl) statusEl.textContent = status || "";
+                progressContainer.style.display = "block";
+                overlay.hidden = false;
+            }
+        }
+        function hideTelecrmLoader() {
+            const overlay = document.getElementById("telecrm-loader-overlay");
+            if (overlay) {
+                overlay.style.opacity = "0";
+                setTimeout(() => {
+                    overlay.hidden = true;
+                    overlay.style.opacity = "1";
+                }, 300);
+            }
+        }
+        function updateTelecrmLoaderStatus(status) {
+            const el = document.getElementById("telecrm-loader-status");
+            if (el) el.textContent = status;
+        }
+        function updateTelecrmProgress(percent) {
+            const bar = document.getElementById("telecrm-progress-bar");
+            if (bar) bar.style.width = (percent || 0) + "%";
+        }
+        function showTelecrmSuccess(message) {
+            addLog("✓ " + message, "success");
+        }
 
         Office.onReady((info) => {
             if (info.host === Office.HostType.Excel) {
@@ -82,10 +176,13 @@
             const statusText = document.getElementById("status-text");
             const logBox = document.getElementById("log-box");
 
-            // UI Reset
             btn.disabled = true;
             progressArea.style.display = "block";
             logBox.innerHTML = "";
+
+            // Show overlay loader (same as AppScript: "Processing" / "Preparing...")
+            showTelecrmLoader("Processing", "Reading sheet data...");
+            updateTelecrmProgress(10);
 
             try {
                 await Excel.run(async (context) => {
@@ -95,59 +192,69 @@
                     await context.sync();
 
                     const rows = range.values;
-                    const dataLength = rows.length - 1; // Subtract header
+                    const dataLength = rows.length - 1;
 
                     if (dataLength <= 0) {
+                        hideTelecrmLoader();
                         addLog("No data found to sync.", "error");
                         return;
                     }
 
+                    updateTelecrmLoaderStatus("Sending to TeleCRM...");
+                    updateTelecrmProgress(20);
+
                     for (let i = 1; i < rows.length; i++) {
                         const row = rows[i];
-                        
-                        // Map Excel Columns to API fields
                         const payload = {
                             "fields": {
                                 "name": String(row[0] || ""),
                                 "phone": String(row[1] || ""),
                                 "email": String(row[2] || ""),
-                                "status": String(row[3] || ""),
+                                "status": "Fresh"
                             },
                             "actions": [{ "type": "ACTION_1001", "fields": { "notes": "Excel Add-in Sync" } }]
                         };
 
+                        addLog(`Row ${i + 1} payload: ${JSON.stringify(payload)}`, "");
+
                         try {
                             const response = await fetch(CONFIG.apiUrl(CONFIG.enterpriseId), {
                                 method: 'POST',
-                                headers: { 
-                                    'Content-Type': 'application/json', 
-                                    'Authorization': `Bearer ${CONFIG.token}` 
+                                headers: {
+                                    'Content-Type': 'application/json',
+                                    'Authorization': `Bearer ${CONFIG.token}`
                                 },
                                 body: JSON.stringify(payload)
                             });
 
                             if (response.ok) {
-                                addLog(`Row ${i+1}: Success - ${row[0]}`, "success");
+                                addLog(`Row ${i + 1}: Success - ${row[0]}`, "success");
                             } else {
-                                addLog(`Row ${i+1}: Failed (${response.status})`, "error");
-                                addLog(`Row ${i+1}: Failed (${JSON.stringify(payload)})`
+                                addLog(`Row ${i + 1}: Failed (${response.status})`, "error");
                             }
                         } catch (e) {
-                            addLog(`Row ${i+1}: Network Error`, "error");
+                            addLog(`Row ${i + 1}: Network Error`, "error");
                         }
 
-                        // Update Progress UI
-                        const progress = Math.round((i / dataLength) * 100);
+                        const progress = 20 + Math.round((i / dataLength) * 78);
+                        updateTelecrmProgress(progress);
+                        updateTelecrmLoaderStatus(`Sending ${i} of ${dataLength}...`);
                         progressBar.style.width = progress + "%";
-                        percentText.innerText = progress + "%";
+                        percentText.innerText = Math.round((i / dataLength) * 100) + "%";
                         statusText.innerText = `Syncing ${i} of ${dataLength}`;
                     }
 
+                    updateTelecrmProgress(100);
+                    updateTelecrmLoaderStatus("Complete!");
                     statusText.innerText = "Synchronization Complete!";
                     addLog("--- Finished ---", "");
                 });
+
+                hideTelecrmLoader();
+                showTelecrmSuccess("All data sent to CRM.");
             } catch (error) {
-                addLog("Excel Error: " + error, "error");
+                hideTelecrmLoader();
+                addLog("Error: " + error, "error");
             } finally {
                 btn.disabled = false;
             }
@@ -156,7 +263,7 @@
         function addLog(message, type) {
             const logBox = document.getElementById("log-box");
             const entry = document.createElement("div");
-            entry.className = "log-entry " + type;
+            entry.className = "log-entry " + (type || "");
             entry.innerText = `[${new Date().toLocaleTimeString()}] ${message}`;
             logBox.prepend(entry);
         }

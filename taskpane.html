@@ -63,8 +63,8 @@
     <script>
         // CONFIGURATION: Replace with your actual details
         const CONFIG = {
-            enterpriseId: "YOUR_ENTERPRISE_ID",
-            token: "YOUR_BEARER_TOKEN",
+            enterpriseId: "68ca629e32c595c15bfc4f6f",
+            token: "00b7c0bd-b8fb-43bd-915a-6981251312f51771223724641:aa7a74d0-7ae9-4726-a188-e57dfa7a823f",
             apiUrl: (id) => `https://next-api.telecrm.in/enterprise/${id}/autoupdatelead`
         };
 
@@ -111,7 +111,7 @@
                                 "name": String(row[0] || ""),
                                 "phone": String(row[1] || ""),
                                 "email": String(row[2] || ""),
-                                "status": "Fresh"
+                                "status": String(row[3] || ""),
                             },
                             "actions": [{ "type": "ACTION_1001", "fields": { "notes": "Excel Add-in Sync" } }]
                         };

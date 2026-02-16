@@ -122,7 +122,7 @@
             </div>
             <div class="form-group">
                 <label for="end-range">End Cell:</label>
-                <input type="text" id="end-range" placeholder="e.g. D100">
+                <input type="text" id="end-range" placeholder="e.g. G100">
             </div>
 
             <button id="run-button" class="ms-Button">Send Data</button>
@@ -338,6 +338,19 @@
             addLog("✓ " + message, "success");
         }
 
+        /** Convert Excel serial date (e.g. 46045) to DD/MM/YYYY for Telecrm. Sheet shows 1/23/2026 → send 23/01/2026. Leaves non-numeric as-is. */
+        function excelDateToDDMMYYYY(val) {
+            if (val === null || val === undefined || val === "") return "";
+            var n = Number(val);
+            if (isNaN(n) || n < 1) return String(val).trim();
+            var date = new Date((n - 25569) * 86400 * 1000);
+            if (isNaN(date.getTime())) return String(val).trim();
+            var dd = date.getDate();
+            var mm = date.getMonth() + 1;
+            var yyyy = date.getFullYear();
+            return (dd < 10 ? "0" : "") + dd + "/" + (mm < 10 ? "0" : "") + mm + "/" + yyyy;
+        }
+
         async function handleSync() {
             var btn = document.getElementById("run-button");
             var progressArea = document.getElementById("progress-area");
@@ -455,8 +468,8 @@
                         var gidStatus = String(row[2] || "");
                         var store_name = String(row[3] || "");
                         var store_id = String(row[4] || "");
-                        var doo = String(row[5] || "");
-                        var doa = String(row[6] || "");
+                        var doo = excelDateToDDMMYYYY(row[5]);
+                        var doa = excelDateToDDMMYYYY(row[6]);
                         var payload = {
                             "fields": {
                                 "phone": phoneVal,

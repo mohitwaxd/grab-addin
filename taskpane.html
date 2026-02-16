@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8" />
+    <meta http-equiv="X-UA-Compatible" content="IE=Edge" />
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>TeleCRM Sync Pro</title>
+    <script src="https://appsforoffice.microsoft.com/lib/1/hosted/office.js" type="text/javascript"></script>
+    
+    <style>
+        body { font-family: 'Segoe UI', Tahoma, sans-serif; padding: 0; margin: 0; background-color: #faf9f8; color: #323130; }
+        .header { background: #217346; color: white; padding: 20px; text-align: center; }
+        .header h1 { margin: 0; font-size: 18px; font-weight: 600; }
+        .container { padding: 20px; }
+        .card { background: white; border-radius: 4px; padding: 15px; box-shadow: 0 1.6px 3.6px rgba(0,0,0,0.1); margin-bottom: 20px; }
+        
+        .ms-Button { background: #217346; color: white; border: none; padding: 12px; width: 100%; font-size: 14px; font-weight: 600; cursor: pointer; border-radius: 2px; }
+        .ms-Button:hover { background: #185735; }
+        .ms-Button:disabled { background: #c8c6c4; cursor: not-allowed; }
+
+        .progress-container { margin-top: 20px; }
+        .progress-label { display: flex; justify-content: space-between; font-size: 12px; margin-bottom: 5px; }
+        .progress-bg { background: #edebe9; height: 12px; width: 100%; border-radius: 6px; overflow: hidden; }
+        .progress-fill { background: #217346; height: 100%; width: 0%; transition: width 0.3s ease; }
+
+        .log-box { background: #ffffff; border: 1px solid #e1dfdd; height: 200px; overflow-y: auto; font-family: 'Courier New', monospace; font-size: 11px; padding: 10px; margin-top: 10px; }
+        .log-entry { margin-bottom: 4px; border-bottom: 1px solid #f3f2f1; padding-bottom: 2px; }
+        .success { color: #107c10; font-weight: bold; }
+        .error { color: #a4262c; font-weight: bold; }
+        .footer { font-size: 10px; color: #605e5c; text-align: center; margin-top: 20px; }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>TeleCRM Lead Sync</h1>
+    </div>
+
+    <div class="container">
+        <div class="card">
+            <p style="margin-top:0; font-size: 13px;">Sync your active sheet data to TeleCRM instantly.</p>
+            <button id="run-button" class="ms-Button">Start Synchronization</button>
+            
+            <div id="progress-area" style="display:none;" class="progress-container">
+                <div class="progress-label">
+                    <span id="status-text">Processing...</span>
+                    <span id="percent-text">0%</span>
+                </div>
+                <div class="progress-bg">
+                    <div id="progress-bar" class="progress-fill"></div>
+                </div>
+            </div>
+        </div>
+
+        <div class="card">
+            <div style="font-size: 13px; font-weight: 600; margin-bottom: 5px;">Activity Logs</div>
+            <div id="log-box" class="log-box">
+                <div class="log-entry">Waiting for user...</div>
+            </div>
+        </div>
+        <div class="footer">Connected to TeleCRM API v2.0</div>
+    </div>
+
+    <script>
+        // CONFIGURATION: Replace with your actual details
+        const CONFIG = {
+            enterpriseId: "YOUR_ENTERPRISE_ID",
+            token: "YOUR_BEARER_TOKEN",
+            apiUrl: (id) => `https://next-api.telecrm.in/enterprise/${id}/autoupdatelead`
+        };
+
+        Office.onReady((info) => {
+            if (info.host === Office.HostType.Excel) {
+                document.getElementById("run-button").onclick = handleSync;
+            }
+        });
+
+        async function handleSync() {
+            const btn = document.getElementById("run-button");
+            const progressArea = document.getElementById("progress-area");
+            const progressBar = document.getElementById("progress-bar");
+            const percentText = document.getElementById("percent-text");
+            const statusText = document.getElementById("status-text");
+            const logBox = document.getElementById("log-box");
+
+            // UI Reset
+            btn.disabled = true;
+            progressArea.style.display = "block";
+            logBox.innerHTML = "";
+
+            try {
+                await Excel.run(async (context) => {
+                    const sheet = context.workbook.worksheets.getActiveWorksheet();
+                    const range = sheet.getUsedRange();
+                    range.load("values");
+                    await context.sync();
+
+                    const rows = range.values;
+                    const dataLength = rows.length - 1; // Subtract header
+
+                    if (dataLength <= 0) {
+                        addLog("No data found to sync.", "error");
+                        return;
+                    }
+
+                    for (let i = 1; i < rows.length; i++) {
+                        const row = rows[i];
+                        
+                        // Map Excel Columns to API fields
+                        const payload = {
+                            "fields": {
+                                "name": String(row[0] || ""),
+                                "phone": String(row[1] || ""),
+                                "email": String(row[2] || ""),
+                                "status": "Fresh"
+                            },
+                            "actions": [{ "type": "ACTION_1001", "fields": { "notes": "Excel Add-in Sync" } }]
+                        };
+
+                        try {
+                            const response = await fetch(CONFIG.apiUrl(CONFIG.enterpriseId), {
+                                method: 'POST',
+                                headers: { 
+                                    'Content-Type': 'application/json', 
+                                    'Authorization': `Bearer ${CONFIG.token}` 
+                                },
+                                body: JSON.stringify(payload)
+                            });
+
+                            if (response.ok) {
+                                addLog(`Row ${i+1}: Success - ${row[0]}`, "success");
+                            } else {
+                                addLog(`Row ${i+1}: Failed (${response.status})`, "error");
+                            }
+                        } catch (e) {
+                            addLog(`Row ${i+1}: Network Error`, "error");
+                        }
+
+                        // Update Progress UI
+                        const progress = Math.round((i / dataLength) * 100);
+                        progressBar.style.width = progress + "%";
+                        percentText.innerText = progress + "%";
+                        statusText.innerText = `Syncing ${i} of ${dataLength}`;
+                    }
+
+                    statusText.innerText = "Synchronization Complete!";
+                    addLog("--- Finished ---", "");
+                });
+            } catch (error) {
+                addLog("Excel Error: " + error, "error");
+            } finally {
+                btn.disabled = false;
+            }
+        }
+
+        function addLog(message, type) {
+            const logBox = document.getElementById("log-box");
+            const entry = document.createElement("div");
+            entry.className = "log-entry " + type;
+            entry.innerText = `[${new Date().toLocaleTimeString()}] ${message}`;
+            logBox.prepend(entry);
+        }
+    </script>
+</body>
+</html>

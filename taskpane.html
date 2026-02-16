@@ -5,8 +5,6 @@
     <meta http-equiv="X-UA-Compatible" content="IE=Edge" />
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>TeleCRM Sync Pro</title>
-    <script src="https://appsforoffice.microsoft.com/lib/1/hosted/office.js" type="text/javascript"></script>
-    
     <style>
         /* Same color palette as appscript.html (Telecrm purple + blue loader) */
         body { font-family: 'Segoe UI', Tahoma, sans-serif; padding: 0; margin: 0; background-color: #FFF; color: #333; position: relative; min-height: 100vh; }
@@ -119,20 +117,37 @@
         <div class="footer">Connected to TeleCRM API v2.0</div>
     </div>
 
+    <!-- Load Office.js first so it runs before our script (required for Office.onReady) -->
+    <script src="https://appsforoffice.microsoft.com/lib/1/hosted/office.js" type="text/javascript"></script>
     <script>
+        // Office.js requirement: call Office.onReady() as the first thing in your loading sequence.
+        // See https://learn.microsoft.com/en-us/office/dev/add-ins/develop/initialize-add-in
+        (function() {
+            if (typeof Office === "undefined") {
+                console.error("Office.js is not loaded. Run this add-in inside Excel.");
+                return;
+            }
+            Office.onReady(function(info) {
+                if (info.host === Office.HostType.Excel) {
+                    var runBtn = document.getElementById("run-button");
+                    if (runBtn) runBtn.onclick = handleSync;
+                }
+            });
+        })();
+
         // CONFIGURATION: Replace with your actual details
-        const CONFIG = {
+        var CONFIG = {
             enterpriseId: "YOUR_ENTERPRISE_ID",
             token: "YOUR_BEARER_TOKEN",
-            apiUrl: (id) => `https://next-api.telecrm.in/enterprise/${id}/autoupdatelead`
+            apiUrl: function(id) { return "https://next-api.telecrm.in/enterprise/" + id + "/autoupdatelead"; }
         };
 
         // ----- Loader helpers (same UX as AppScript Send Data dialog) -----
         function showTelecrmLoader(message, status) {
-            const overlay = document.getElementById("telecrm-loader-overlay");
-            const msgEl = document.getElementById("telecrm-loader-message");
-            const statusEl = document.getElementById("telecrm-loader-status");
-            const progressContainer = document.getElementById("telecrm-progress-container");
+            var overlay = document.getElementById("telecrm-loader-overlay");
+            var msgEl = document.getElementById("telecrm-loader-message");
+            var statusEl = document.getElementById("telecrm-loader-status");
+            var progressContainer = document.getElementById("telecrm-progress-container");
             if (overlay) {
                 if (msgEl) msgEl.textContent = message || "Loading...";
                 if (statusEl) statusEl.textContent = status || "";
@@ -141,32 +156,26 @@
             }
         }
         function hideTelecrmLoader() {
-            const overlay = document.getElementById("telecrm-loader-overlay");
+            var overlay = document.getElementById("telecrm-loader-overlay");
             if (overlay) {
                 overlay.style.opacity = "0";
-                setTimeout(() => {
+                setTimeout(function() {
                     overlay.hidden = true;
                     overlay.style.opacity = "1";
                 }, 300);
             }
         }
         function updateTelecrmLoaderStatus(status) {
-            const el = document.getElementById("telecrm-loader-status");
+            var el = document.getElementById("telecrm-loader-status");
             if (el) el.textContent = status;
         }
         function updateTelecrmProgress(percent) {
-            const bar = document.getElementById("telecrm-progress-bar");
+            var bar = document.getElementById("telecrm-progress-bar");
             if (bar) bar.style.width = (percent || 0) + "%";
         }
         function showTelecrmSuccess(message) {
             addLog("✓ " + message, "success");
         }
-
-        Office.onReady((info) => {
-            if (info.host === Office.HostType.Excel) {
-                document.getElementById("run-button").onclick = handleSync;
-            }
-        });
 
         async function handleSync() {
             const btn = document.getElementById("run-button");

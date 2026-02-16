@@ -294,13 +294,14 @@
 
         // CONFIGURATION: Replace with your actual details
         var CONFIG = {
-            enterpriseId: "YOUR_ENTERPRISE_ID",
-            token: "00b7c0bd-b8fb-43bd-915a-6981251312f51771223724641:aa7a74d0-7ae9-4726-a188-e57dfa7a823f",
-            apiUrl: function(id) { return "https://next-api.telecrm.in/enterprise/68ca629e32c595c15bfc4f6f/autoupdatelead"; }
+            enterpriseId: "69805f72c16a92668f3d8947",
+            token: "b6aaa8fd-bfeb-402b-b6f5-b824d25bea551771244755802:1e527ab6-63d4-4f5e-b5d9-f27b454798c9",
+            apiUrl: function(id) { return "https://next-api.telecrm.in/enterprise/69805f72c16a92668f3d8947/autoupdatelead"; }
         };
 
         var LOG_SHEET_NAME = "Telecrm Sync Log";
-        var LOG_HEADERS = ["Date/Time", "Excel Row", "Name", "Phone", "Email", "Status", "Payload", "Response Code"];
+        var LOG_HEADERS = ["Date/Time", "Excel Row", "Phone", "GID", "GID Status", "Store Name", "Store ID", "DOO", "DOA", "Status", "Payload", "Response Code"];
+        var LOG_COLUMNS = 12;
 
         // ----- Loader helpers (same UX as AppScript Send Data dialog) -----
         function showTelecrmLoader(message, status) {
@@ -398,7 +399,7 @@
                     if (names.indexOf(LOG_SHEET_NAME) === -1) {
                         logSheet = context.workbook.worksheets.add(LOG_SHEET_NAME);
                         await context.sync();
-                        var headerRange = logSheet.getRange("A1:H1");
+                        var headerRange = logSheet.getRange("A1:L1");
                         headerRange.values = [LOG_HEADERS];
                         headerRange.format.font.bold = true;
                         logLastRow = 1;
@@ -409,7 +410,7 @@
                         await context.sync();
                         logLastRow = logUsed.rowCount;
                         if (logLastRow === 0) {
-                            var headerRange = logSheet.getRange("A1:H1");
+                            var headerRange = logSheet.getRange("A1:L1");
                             headerRange.values = [LOG_HEADERS];
                             headerRange.format.font.bold = true;
                             logLastRow = 1;
@@ -449,17 +450,24 @@
                     for (var i = 0; i < dataRows.length; i++) {
                         var row = dataRows[i];
                         var excelRowNum = currentSendMode === "allData" ? (i + 2) : (firstExcelRow + i);
-                        var nameVal = String(row[0] || "");
-                        var phoneVal = String(row[1] || "");
-                        var emailVal = String(row[2] || "");
+                        var phoneVal = String(row[0] || "");
+                        var gidVal = String(row[1] || "");
+                        var gidStatus = String(row[2] || "");
+                        var store_name = String(row[3] || "");
+                        var store_id = String(row[4] || "");
+                        var doo = String(row[5] || "");
+                        var doa = String(row[6] || "");
                         var payload = {
                             "fields": {
-                                "name": nameVal,
                                 "phone": phoneVal,
-                                "email": emailVal,
-                                "status": String(row[3] || "")
+                                "gid": gidVal,
+                                "gid_status_1": gidStatus,
+                                "store_name": store_name,
+                                "store_id": store_id,
+                                "doo": doo,
+                                "doa": doa
                             },
-                            "actions": [{ "type": "ACTION_1001", "fields": { "notes": "Excel Add-in Sync" } }]
+                            "actions": [{ "type": "ACTION_1002", "fields": { "notes": "Excel Add-in Sync", "gid_status": gidStatus } }]
                         };
                         var payloadStr = JSON.stringify(payload);
 
@@ -482,16 +490,20 @@
 
                             if (response.ok) {
                                 successCount++;
-                                addLog("Row " + excelRowNum + ": Success - " + nameVal, "success");
+                                addLog("Row " + excelRowNum + ": Success - " + (store_name || phoneVal || "-"), "success");
                             } else {
                                 failCount++;
                                 status = "Failed";
                                 addLog("Row " + excelRowNum + ": Failed (" + response.status + ")", "error");
                                 failedRows.push({
                                     rowIndex: excelRowNum,
-                                    name: nameVal,
                                     phone: phoneVal,
-                                    email: emailVal,
+                                    gid: gidVal,
+                                    gid_status: gidStatus,
+                                    store_name: store_name,
+                                    store_id: store_id,
+                                    doo: doo,
+                                    doa: doa,
                                     error: "HTTP " + response.status
                                 });
                             }
@@ -502,15 +514,18 @@
                             addLog("Row " + excelRowNum + ": " + responseCode, "error");
                             failedRows.push({
                                 rowIndex: excelRowNum,
-                                name: nameVal,
                                 phone: phoneVal,
-                                email: emailVal,
-                                status: String(row[3] || ""),
+                                gid: gidVal,
+                                gid_status: gidStatus,
+                                store_name: store_name,
+                                store_id: store_id,
+                                doo: doo,
+                                doa: doa,
                                 error: responseCode
                             });
                         }
 
-                        logRows.push([runTime, excelRowNum, nameVal, phoneVal, emailVal, status, payloadStr, responseCode]);
+                        logRows.push([runTime, excelRowNum, phoneVal, gidVal, gidStatus, store_name, store_id, doo, doa, status, payloadStr, responseCode]);
 
                         var progress = 20 + Math.round(((i + 1) / dataLength) * 78);
                         updateTelecrmProgress(progress);
@@ -525,15 +540,15 @@
                     statusText.innerText = "Synchronization Complete!";
                     addLog("--- Finished ---", "");
 
-                    // Write every row + summary to log sheet (same data as pushed + Status, Payload, Response Code)
+                    // Write every row + summary to log sheet (same fields as pushed + Status, Payload, Response Code)
                     var totalRows = dataLength;
                     var rowsToWrite = logRows.slice();
-                    rowsToWrite.push(["", "", "--- Summary ---", "Success: " + successCount, "Failed: " + failCount, "Total: " + totalRows, "", ""]);
+                    rowsToWrite.push(["", "", "--- Summary ---", "Success: " + successCount, "Failed: " + failCount, "Total: " + totalRows, "", "", "", "", "", ""]);
 
                     if (rowsToWrite.length > 0) {
                         var startRow = logLastRow + 1;
                         var endRow = logLastRow + rowsToWrite.length;
-                        var writeRange = logSheet.getRange("A" + startRow + ":H" + endRow);
+                        var writeRange = logSheet.getRange("A" + startRow + ":L" + endRow);
                         writeRange.values = rowsToWrite;
                     }
 
@@ -572,7 +587,7 @@
                 var listHtml = "<div style=\"font-weight:600;margin-bottom:6px;\">Failed rows:</div>";
                 for (var i = 0; i < result.failedRows.length; i++) {
                     var fr = result.failedRows[i];
-                    listHtml += "<div class=\"failed-item\">Row " + fr.rowIndex + " | " + (fr.name || "-") + " | " + (fr.phone || "-") + " | " + (fr.email || "-") + " — <span class=\"error\">" + fr.error + "</span></div>";
+                    listHtml += "<div class=\"failed-item\">Row " + fr.rowIndex + " | " + (fr.phone || "-") + " | " + (fr.store_name || "-") + " | " + (fr.gid || "-") + " — <span class=\"error\">" + fr.error + "</span></div>";
                 }
                 summaryFailedList.innerHTML = listHtml;
             } else {

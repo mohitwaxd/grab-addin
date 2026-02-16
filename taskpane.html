@@ -31,6 +31,14 @@
         .summary-failed-list { font-size: 12px; margin-top: 10px; max-height: 180px; overflow-y: auto; border: 1px solid #e0e0e0; border-radius: 4px; padding: 8px; background: #fff; }
         .summary-failed-list .failed-item { padding: 6px 0; border-bottom: 1px solid #f0f0f0; }
         .summary-failed-list .failed-item:last-child { border-bottom: none; }
+        .segment-control { display: flex; background: #F7F4FA; border-radius: 8px; padding: 5px; margin: 12px 0; }
+        .segment-control button { flex: 1; border: none; padding: 10px; font-size: 13px; font-weight: 500; cursor: pointer; background: transparent; color: #6b50a0; border-radius: 6px; }
+        .segment-control button.active { background: #FFF; color: #4a3882; font-weight: 600; box-shadow: 0 1px 4px rgba(0,0,0,0.1); }
+        .segment-control button:hover:not(.active) { background: rgba(255,255,255,0.6); }
+        .range-preview { border: 1px solid #e0e0e0; padding: 8px 12px; border-radius: 4px; background: #f9f9f9; margin-bottom: 12px; font-size: 13px; color: #555; }
+        .form-group { margin-bottom: 12px; }
+        .form-group label { display: block; font-size: 12px; font-weight: 600; color: #333; margin-bottom: 4px; }
+        .form-group input { width: 100%; padding: 8px 10px; border: 1px solid #e0e0e0; border-radius: 4px; font-size: 13px; box-sizing: border-box; }
         .footer { font-size: 10px; color: #888; text-align: center; margin-top: 20px; }
 
         /* Overlay loader (same as AppScript getEnhancedLoaderStyles) */
@@ -99,8 +107,25 @@
 
     <div class="container">
         <div class="card">
-            <p style="margin-top:0; font-size: 13px;">Send all data from the active sheet to Telecrm in one click.</p>
-            <button id="run-button" class="ms-Button">Send All Data to CRM</button>
+            <p style="margin-top:0; font-size: 13px;">Choose a custom range or send all data to Telecrm.</p>
+
+            <div class="segment-control">
+                <button type="button" id="custom-segment" class="active">Custom</button>
+                <button type="button" id="all-data-segment">All Data</button>
+            </div>
+
+            <div id="range-preview" class="range-preview">Loading sheet info...</div>
+
+            <div class="form-group">
+                <label for="start-range">Start Cell:</label>
+                <input type="text" id="start-range" placeholder="e.g. A2">
+            </div>
+            <div class="form-group">
+                <label for="end-range">End Cell:</label>
+                <input type="text" id="end-range" placeholder="e.g. D100">
+            </div>
+
+            <button id="run-button" class="ms-Button">Send Data</button>
             
             <div id="progress-area" style="display:none;" class="progress-container">
                 <div class="progress-label">
@@ -113,6 +138,13 @@
             </div>
         </div>
 
+
+        <div id="summary-card" class="card summary-card" style="display: none;">
+            <div style="font-size: 13px; font-weight: 600; margin-bottom: 8px;">Sync overview</div>
+            <div id="summary-stats" class="summary-stats"></div>
+            <div id="summary-failed-list" class="summary-failed-list" style="display: none;"></div>
+        </div>
+
         <div class="card">
             <div style="font-size: 13px; font-weight: 600; margin-bottom: 5px;">Activity Logs</div>
             <div id="log-box" class="log-box">
@@ -120,11 +152,6 @@
             </div>
         </div>
 
-        <div id="summary-card" class="card summary-card" style="display: none;">
-            <div style="font-size: 13px; font-weight: 600; margin-bottom: 8px;">Sync overview</div>
-            <div id="summary-stats" class="summary-stats"></div>
-            <div id="summary-failed-list" class="summary-failed-list" style="display: none;"></div>
-        </div>
         <div class="footer">Connected to Telecrm API v2.0</div>
     </div>
 
@@ -142,9 +169,128 @@
                 if (info.host === Office.HostType.Excel) {
                     var runBtn = document.getElementById("run-button");
                     if (runBtn) runBtn.onclick = handleSync;
+                    bindSegmentControls();
+                    loadSheetInfo();
                 }
             });
         })();
+
+        var currentSendMode = "custom";
+        var allDataRange = "";
+        var totalRowsAll = 0;
+
+        function columnToLetter(n) {
+            var letter = "";
+            while (n > 0) {
+                var t = (n - 1) % 26;
+                letter = String.fromCharCode(65 + t) + letter;
+                n = (n - t - 1) / 26;
+            }
+            return letter;
+        }
+
+        function getRowFromCell(cell) {
+            var m = (cell || "").toUpperCase().match(/[A-Z]+(\d+)/);
+            return m ? parseInt(m[1], 10) : null;
+        }
+
+        function bindSegmentControls() {
+            var customSeg = document.getElementById("custom-segment");
+            var allDataSeg = document.getElementById("all-data-segment");
+            var startInput = document.getElementById("start-range");
+            var endInput = document.getElementById("end-range");
+            if (customSeg) customSeg.onclick = setCustom;
+            if (allDataSeg) allDataSeg.onclick = setAllData;
+            if (startInput) startInput.addEventListener("input", onCustomInput);
+            if (endInput) endInput.addEventListener("input", onCustomInput);
+        }
+
+        function setCustom() {
+            currentSendMode = "custom";
+            var customSeg = document.getElementById("custom-segment");
+            var allDataSeg = document.getElementById("all-data-segment");
+            var startInput = document.getElementById("start-range");
+            var endInput = document.getElementById("end-range");
+            if (customSeg) customSeg.classList.add("active");
+            if (allDataSeg) allDataSeg.classList.remove("active");
+            if (startInput) { startInput.readOnly = false; startInput.value = ""; }
+            if (endInput) { endInput.readOnly = false; endInput.value = ""; }
+            updatePreview("Please enter a custom range.", "#555");
+            updateSendButton();
+        }
+
+        function setAllData() {
+            currentSendMode = "allData";
+            var customSeg = document.getElementById("custom-segment");
+            var allDataSeg = document.getElementById("all-data-segment");
+            var startInput = document.getElementById("start-range");
+            var endInput = document.getElementById("end-range");
+            if (customSeg) customSeg.classList.remove("active");
+            if (allDataSeg) allDataSeg.classList.add("active");
+            var parts = allDataRange.split(":");
+            if (parts.length === 2) {
+                if (startInput) { startInput.value = parts[0]; startInput.readOnly = true; }
+                if (endInput) { endInput.value = parts[1]; endInput.readOnly = true; }
+            }
+            updatePreview("Range set to: " + allDataRange, "#4285f4");
+            updateSendButton();
+        }
+
+        function updatePreview(msg, color) {
+            var p = document.getElementById("range-preview");
+            if (p) { p.textContent = msg; p.style.color = color || "#555"; }
+        }
+
+        function updateSendButton() {
+            var btn = document.getElementById("run-button");
+            if (!btn) return;
+            var count = 0;
+            if (currentSendMode === "allData") {
+                count = totalRowsAll;
+            } else {
+                var s = (document.getElementById("start-range") || {}).value || "";
+                var e = (document.getElementById("end-range") || {}).value || "";
+                var r1 = getRowFromCell(s), r2 = getRowFromCell(e);
+                if (r1 !== null && r2 !== null && r2 >= r1) count = r2 - r1 + 1;
+            }
+            btn.textContent = count > 0 ? "Send Data (" + count + " rows)" : "Send Data";
+        }
+
+        function onCustomInput() {
+            if (currentSendMode !== "custom") return;
+            var s = (document.getElementById("start-range") || {}).value.toUpperCase();
+            var e = (document.getElementById("end-range") || {}).value.toUpperCase();
+            var r1 = getRowFromCell(s), r2 = getRowFromCell(e);
+            if (r1 === null || r2 === null) updatePreview("Please enter a custom range.", "#555");
+            else if (r2 < r1) updatePreview("Invalid range: end before start", "#dc3545");
+            else updatePreview("Range: " + s + ":" + e, "#4285f4");
+            updateSendButton();
+        }
+
+        function loadSheetInfo() {
+            Excel.run(function(context) {
+                var sheet = context.workbook.worksheets.getActiveWorksheet();
+                var range = sheet.getUsedRange();
+                range.load("values");
+                return context.sync().then(function() {
+                    var rows = range.values;
+                    if (!rows || rows.length === 0) {
+                        allDataRange = "";
+                        totalRowsAll = 0;
+                        updatePreview("No data in sheet.", "#555");
+                        return;
+                    }
+                    var lastRow = rows.length;
+                    var lastCol = rows[0].length;
+                    totalRowsAll = Math.max(0, lastRow - 1);
+                    allDataRange = "A2:" + columnToLetter(lastCol) + lastRow;
+                    if (currentSendMode === "custom") updatePreview("Please enter a custom range.", "#555");
+                    updateSendButton();
+                });
+            }).catch(function() {
+                updatePreview("Could not load sheet.", "#dc3545");
+            });
+        }
 
         // CONFIGURATION: Replace with your actual details
         var CONFIG = {
@@ -154,7 +300,7 @@
         };
 
         var LOG_SHEET_NAME = "Telecrm Sync Log";
-        var LOG_HEADERS = ["Date/Time", "Excel Row", "Name", "Phone", "Email", "Error"];
+        var LOG_HEADERS = ["Date/Time", "Excel Row", "Name", "Phone", "Email", "Status", "Payload", "Response Code"];
 
         // ----- Loader helpers (same UX as AppScript Send Data dialog) -----
         function showTelecrmLoader(message, status) {
@@ -207,14 +353,39 @@
             logBox.innerHTML = "";
             summaryCard.style.display = "none";
 
+            var startCell = (document.getElementById("start-range") || {}).value || "";
+            var endCell = (document.getElementById("end-range") || {}).value || "";
+            if (currentSendMode === "custom") {
+                var r1 = getRowFromCell(startCell), r2 = getRowFromCell(endCell);
+                if (r1 === null || r2 === null) {
+                    addLog("Enter valid cell references (e.g. A2, D10).", "error");
+                    btn.disabled = false;
+                    return;
+                }
+                if (r2 < r1) {
+                    addLog("End cell must be on or after start cell.", "error");
+                    btn.disabled = false;
+                    return;
+                }
+            }
+
             showTelecrmLoader("Processing", "Reading sheet data...");
             updateTelecrmProgress(10);
 
             try {
                 var result = await Excel.run(async (context) => {
                     var sheet = context.workbook.worksheets.getActiveWorksheet();
-                    var range = sheet.getUsedRange();
-                    range.load("values");
+                    var range = null;
+                    var dataRows = [];
+                    var firstExcelRow = 1;
+
+                    if (currentSendMode === "allData") {
+                        range = sheet.getUsedRange();
+                        range.load("values");
+                    } else {
+                        range = sheet.getRange(startCell + ":" + endCell);
+                        range.load("values");
+                    }
 
                     // Ensure "Telecrm Sync Log" sheet exists
                     var allSheets = context.workbook.worksheets;
@@ -227,7 +398,7 @@
                     if (names.indexOf(LOG_SHEET_NAME) === -1) {
                         logSheet = context.workbook.worksheets.add(LOG_SHEET_NAME);
                         await context.sync();
-                        var headerRange = logSheet.getRange("A1:F1");
+                        var headerRange = logSheet.getRange("A1:H1");
                         headerRange.values = [LOG_HEADERS];
                         headerRange.format.font.bold = true;
                         logLastRow = 1;
@@ -238,7 +409,7 @@
                         await context.sync();
                         logLastRow = logUsed.rowCount;
                         if (logLastRow === 0) {
-                            var headerRange = logSheet.getRange("A1:F1");
+                            var headerRange = logSheet.getRange("A1:H1");
                             headerRange.values = [LOG_HEADERS];
                             headerRange.format.font.bold = true;
                             logLastRow = 1;
@@ -247,8 +418,21 @@
                     await context.sync();
 
                     var rows = range.values;
-                    var dataLength = rows.length - 1;
+                    if (currentSendMode === "allData") {
+                        dataRows = rows.length > 1 ? rows.slice(1) : [];
+                        firstExcelRow = 2;
+                    } else {
+                        var startRowNum = getRowFromCell(startCell);
+                        if (startRowNum === 1) {
+                            dataRows = rows.length > 1 ? rows.slice(1) : [];
+                            firstExcelRow = 2;
+                        } else {
+                            dataRows = rows;
+                            firstExcelRow = startRowNum;
+                        }
+                    }
 
+                    var dataLength = dataRows.length;
                     if (dataLength <= 0) {
                         return { total: 0, success: 0, failed: 0, failedRows: [] };
                     }
@@ -259,23 +443,31 @@
                     var successCount = 0;
                     var failCount = 0;
                     var failedRows = [];
+                    var logRows = [];
                     var runTime = new Date().toLocaleString();
 
-                    for (var i = 1; i < rows.length; i++) {
-                        var row = rows[i];
+                    for (var i = 0; i < dataRows.length; i++) {
+                        var row = dataRows[i];
+                        var excelRowNum = currentSendMode === "allData" ? (i + 2) : (firstExcelRow + i);
+                        var nameVal = String(row[0] || "");
+                        var phoneVal = String(row[1] || "");
+                        var emailVal = String(row[2] || "");
                         var payload = {
                             "fields": {
-                                "name": String(row[0] || ""),
-                                "phone": String(row[1] || ""),
-                                "email": String(row[2] || ""),
-                                "status": String(row[3] || ""),
+                                "name": nameVal,
+                                "phone": phoneVal,
+                                "email": emailVal,
+                                "status": String(row[3] || "")
                             },
                             "actions": [{ "type": "ACTION_1001", "fields": { "notes": "Excel Add-in Sync" } }]
                         };
+                        var payloadStr = JSON.stringify(payload);
 
-                        addLog("Row " + (i + 1) + " payload: " + JSON.stringify(payload), "");
+                        addLog("Row " + excelRowNum + " payload: " + payloadStr, "");
 
-                        var errMsg = "";
+                        var status = "Success";
+                        var responseCode = "";
+
                         try {
                             var response = await fetch(CONFIG.apiUrl(CONFIG.enterpriseId), {
                                 method: "POST",
@@ -283,43 +475,49 @@
                                     "Content-Type": "application/json",
                                     "Authorization": "Bearer " + CONFIG.token
                                 },
-                                body: JSON.stringify(payload)
+                                body: payloadStr
                             });
+
+                            responseCode = response.status.toString();
 
                             if (response.ok) {
                                 successCount++;
-                                addLog("Row " + (i + 1) + ": Success - " + (row[0] || ""), "success");
+                                addLog("Row " + excelRowNum + ": Success - " + nameVal, "success");
                             } else {
                                 failCount++;
-                                errMsg = "HTTP " + response.status;
-                                addLog("Row " + (i + 1) + ": Failed (" + response.status + ")", "error");
+                                status = "Failed";
+                                addLog("Row " + excelRowNum + ": Failed (" + response.status + ")", "error");
                                 failedRows.push({
-                                    rowIndex: i + 1,
-                                    name: String(row[0] || ""),
-                                    phone: String(row[1] || ""),
-                                    email: String(row[2] || ""),
-                                    error: errMsg
+                                    rowIndex: excelRowNum,
+                                    name: nameVal,
+                                    phone: phoneVal,
+                                    email: emailVal,
+                                    error: "HTTP " + response.status
                                 });
                             }
                         } catch (e) {
                             failCount++;
-                            errMsg = e.message || "Network Error";
-                            addLog("Row " + (i + 1) + ": " + errMsg, "error");
+                            status = "Failed";
+                            responseCode = e.message || "Network Error";
+                            addLog("Row " + excelRowNum + ": " + responseCode, "error");
                             failedRows.push({
-                                rowIndex: i + 1,
-                                name: String(row[0] || ""),
-                                phone: String(row[1] || ""),
-                                email: String(row[2] || ""),
-                                error: errMsg
+                                rowIndex: excelRowNum,
+                                name: nameVal,
+                                phone: phoneVal,
+                                email: emailVal,
+                                status: String(row[3] || ""),
+                                error: responseCode
                             });
                         }
 
-                        var progress = 20 + Math.round((i / dataLength) * 78);
+                        logRows.push([runTime, excelRowNum, nameVal, phoneVal, emailVal, status, payloadStr, responseCode]);
+
+                        var progress = 20 + Math.round(((i + 1) / dataLength) * 78);
                         updateTelecrmProgress(progress);
-                        updateTelecrmLoaderStatus("Sending " + i + " of " + dataLength + "...");
+                        updateTelecrmLoaderStatus("Sending " + (i + 1) + " of " + dataLength + "...");
                         progressBar.style.width = progress + "%";
-                        percentText.innerText = Math.round((i / dataLength) * 100) + "%";
-                        statusText.innerText = "Syncing " + i + " of " + dataLength;
+                        percentText.innerText = Math.round(((i + 1) / dataLength) * 100) + "%";
+                        statusText.innerText = "Syncing " + (i + 1) + " of " + dataLength;
                     }
 
                     updateTelecrmProgress(100);
@@ -327,19 +525,15 @@
                     statusText.innerText = "Synchronization Complete!";
                     addLog("--- Finished ---", "");
 
-                    // Write failed rows and summary to log sheet
+                    // Write every row + summary to log sheet (same data as pushed + Status, Payload, Response Code)
                     var totalRows = dataLength;
-                    var rowsToWrite = [];
-                    for (var f = 0; f < failedRows.length; f++) {
-                        var fr = failedRows[f];
-                        rowsToWrite.push([runTime, fr.rowIndex, fr.name, fr.phone, fr.email, fr.error]);
-                    }
-                    rowsToWrite.push(["", "", "--- Summary ---", "Success: " + successCount, "Failed: " + failCount, "Total: " + totalRows]);
+                    var rowsToWrite = logRows.slice();
+                    rowsToWrite.push(["", "", "--- Summary ---", "Success: " + successCount, "Failed: " + failCount, "Total: " + totalRows, "", ""]);
 
                     if (rowsToWrite.length > 0) {
                         var startRow = logLastRow + 1;
                         var endRow = logLastRow + rowsToWrite.length;
-                        var writeRange = logSheet.getRange("A" + startRow + ":F" + endRow);
+                        var writeRange = logSheet.getRange("A" + startRow + ":H" + endRow);
                         writeRange.values = rowsToWrite;
                     }
 
